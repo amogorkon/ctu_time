@@ -10,6 +10,12 @@ import math
 from datetime import datetime, time, timedelta, timezone
 from functools import lru_cache
 
+# Constants from NOAA Technical Report
+SOLAR_RADIUS = 0.26667  # Degrees
+REFRACTION = 0.5667  # Degrees (atmospheric refraction)
+CIVIL_TWILIGHT = -6.0
+SUNRISE_SUNSET = -(SOLAR_RADIUS + REFRACTION)  # -0.8333° for sunrise/sunset
+
 
 @lru_cache(maxsize=365)
 def calculate_high_noon_utc(longitude: float, date: datetime) -> datetime:
@@ -39,6 +45,7 @@ def calculate_midnight_adjustment(longitude: float, date: datetime) -> float:
 
 
 def utc_to_ctu(utc_time: datetime, longitude: float) -> time:
+    # sourcery skip: remove-unnecessary-cast
     """Convert UTC datetime to CTU time."""
     assert utc_time.tzinfo == timezone.utc, "Requires UTC datetime"
     utc_time = utc_time.replace(tzinfo=None)  # Strip timezone for compatibility
@@ -126,9 +133,103 @@ def roundtrip_test(longitude: float):
     print(f"Roundtrip error: {diff:.6f} seconds")
 
 
+######## Dawn/Dusk Calculation ########
+
+
+def julian_date(dt: datetime) -> float:
+    """Convert datetime to Julian Date (UT1) with millisecond precision."""
+    a = (14 - dt.month) // 12
+    y = dt.year + 4800 - a
+    m = dt.month + 12 * a - 3
+    jdn = dt.day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
+    frac = (
+        (dt.hour - 12) / 24
+        + dt.minute / 1440
+        + dt.second / 86400
+        + dt.microsecond / 86400e6
+    )
+    return jdn + frac
+
+
+def solar_coordinates(jd: float) -> tuple:
+    """NOAA-approved solar position (geocentric in degrees)."""
+    # Julian centuries from J2000
+    T = (jd - 2451545.0) / 36525.0
+
+    # Mean solar geometry
+    L = (280.46646 + 36000.76983 * T + 0.0003032 * T**2) % 360
+    M = (357.52911 + 35999.05029 * T - 0.0001537 * T**2) % 360
+    e = 0.016708634 - 0.000042037 * T - 0.0000001267 * T**2
+
+    # Equation of center
+    C = (
+        (1.914602 - 0.004817 * T - 0.000014 * T**2) * math.sin(math.radians(M))
+        + (0.019993 - 0.000101 * T) * math.sin(2 * math.radians(M))
+        + 0.000289 * math.sin(3 * math.radians(M))
+    )
+
+    # True solar longitude and declination
+    λ = (L + C) % 360
+    δ = math.degrees(math.asin(math.sin(math.radians(λ)) * 0.3977895))
+
+    # Equation of time (minutes)
+    ε = 23.4393 - 0.01300 * T
+    y = math.tan(math.radians(ε / 2)) ** 2
+    eot = (
+        y * math.sin(2 * math.radians(L))
+        - 2 * e * math.sin(math.radians(M))
+        + 4 * e * y * math.sin(math.radians(M)) * math.cos(2 * math.radians(L))
+        - 0.5 * y**2 * math.sin(4 * math.radians(L))
+        - 1.25 * e**2 * math.sin(2 * math.radians(M))
+    )
+    eot = math.degrees(eot) * 4  # Convert radians to minutes
+
+    return δ, eot
+
+
+def hour_angle(lat: float, dec: float, elev: float = CIVIL_TWILIGHT) -> float:
+    """Calculate sun hour angle for target elevation (degrees)."""
+    lat_rad = math.radians(lat)
+    dec_rad = math.radians(dec)
+    elev_rad = math.radians(elev)
+
+    cos_ha = (math.sin(elev_rad) - math.sin(lat_rad) * math.sin(dec_rad)) / (
+        math.cos(lat_rad) * math.cos(dec_rad)
+    )
+
+    if cos_ha < -1:
+        return 180.0  # Polar night
+    return 0.0 if cos_ha > 1 else math.degrees(math.acos(cos_ha))
+
+
+def ctu_dawn_dusk(lat: float, lon: float, date: datetime) -> tuple[time, time]:
+    """NOAA-precision dawn/dusk in CTU time."""
+    # Solar noon (using existing CTU code)
+    noon_utc = calculate_high_noon_utc(lon, date).replace(tzinfo=timezone.utc)
+
+    # Solar position at noon
+    jd = julian_date(noon_utc)
+    dec, eot = solar_coordinates(jd)
+
+    # Hour angles
+    ha = hour_angle(lat, dec)
+    dawn_offset = timedelta(minutes=-(ha * 4 + eot))  # NOAA correction
+    dusk_offset = timedelta(minutes=+(ha * 4 + eot))
+
+    # Convert to UTC
+    dawn_utc = noon_utc + dawn_offset
+    dusk_utc = noon_utc + dusk_offset
+
+    # Convert to CTU
+    return (utc_to_ctu(dawn_utc, lon), utc_to_ctu(dusk_utc, lon))
+
+
 if __name__ == "__main__":
     print("Local:", datetime.now().time())
     print("UTC:", datetime.now(timezone.utc).time())
-    long = 9.1829  # Stuttgart
-    print("CTU:", now(long))
-    roundtrip_test(long)
+    lat, lon = 48.7758, 9.1829  # Stuttgart
+    print("CTU:", now(lon))
+    roundtrip_test(lon)
+    dawn, dusk = ctu_dawn_dusk(lat, lon, datetime.now(timezone.utc))
+    print(f"NOAA Dawn: {dawn.strftime('%H:%M:%S')}")
+    print(f"NOAA Dusk: {dusk.strftime('%H:%M:%S')}")
