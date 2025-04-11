@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from hypothesis import given
@@ -81,3 +81,19 @@ def test_leap_year():
     """Feb 29 should produce valid CTU time"""
     noon = calculate_high_noon_utc(0.0, datetime(2024, 2, 29))
     assert noon.month == 2 and noon.day == 29, "Leap year handling failed"
+
+
+def test_date_rollover():
+    """CTU midnight hour crossing into next UTC day"""
+    # Stuttgart, 2025-04-10 23:55:00 CTU
+    ctu = time(23, 55, 0)
+    utc = ctu_to_utc(ctu, datetime(2025, 4, 10), 9.1829)
+    assert utc.date() == date(2025, 4, 11), "Date rollover failed"
+
+
+def test_microsecond_edge_cases():
+    """999999μs → 1s rollover"""
+    ctu = time(12, 0, 0, 999999)
+    utc = ctu_to_utc(ctu, datetime(2025, 4, 10), 9.1829)
+    back = utc_to_ctu(utc, 9.1829)
+    assert back == time(12, 0, 1), "Microsecond rollover failed"
