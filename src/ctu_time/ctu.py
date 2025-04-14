@@ -15,13 +15,19 @@ SOLAR_RADIUS = 0.26667  # Degrees
 REFRACTION = 0.5667  # Degrees (atmospheric refraction)
 CIVIL_TWILIGHT = -6.0
 SUNRISE_SUNSET = -(SOLAR_RADIUS + REFRACTION)  # -0.8333° for sunrise/sunset
-FIXED_HOURS = 22
-FIXED_SEC = FIXED_HOURS * 3600  # 79200 seconds
+
+# Asymmetrical model: first 23 hours are fixed.
+FIXED_HOURS = 23
+FIXED_SEC = FIXED_HOURS * 3600  # 82800 seconds fixed
+TOTAL_CTU_SEC = 86400  # CTU day length in seconds
 
 
 @lru_cache(maxsize=365)
 def calc_noon_utc(longitude: float, dt: datetime) -> datetime:
-    """Calculate UTC-aware solar noon."""
+    """
+    Calculate UTC-aware solar noon from approximate astronomical formulas.
+    The equation of time approximates the discrepancy between sundial time and clock time.
+    """
     n = dt.timetuple().tm_yday
     B = math.radians(360 / 365.2422 * (n - 81))
     eot = (
@@ -36,62 +42,60 @@ def calc_noon_utc(longitude: float, dt: datetime) -> datetime:
 
 
 def utc_to_ctu(utc: datetime, longitude: float) -> tuple[time, date]:
+    """
+    Convert UTC to CTU using an asymmetrical midnight hour model.
+
+    In this model, the first 23 CTU hours (82800 seconds) are mapped directly
+    1:1 from solar time (measured from solar midnight). The remaining part of the
+    solar day is scaled into exactly 3600 CTU seconds (the variable midnight hour).
+
+    Returns a tuple (CTU time, reference date), where the reference day is that
+    corresponding to the computed solar noon.
+    """
     if utc.utcoffset() != timedelta(0):
         raise ValueError("UTC datetime required")
 
+    # Determine the correct solar window by testing candidate days.
     def window_for_day(base_day: date):
         noon = calc_noon_utc(
             longitude, datetime.combine(base_day, time(), tzinfo=timezone.utc)
         )
         next_noon = calc_noon_utc(longitude, noon + timedelta(days=1))
         T_solar = (next_noon - noon).total_seconds()
-        flex_total = T_solar - FIXED_SEC
-        flex_margin = flex_total / 2
         solar_midnight = noon - timedelta(seconds=T_solar / 2)
-        return {
-            "ref_noon": noon,
-            "solar_midnight": solar_midnight,
-            "T_solar": T_solar,
-            "flex_margin": flex_margin,
-        }
+        return noon, solar_midnight, T_solar
 
     today = utc.date()
     for day_offset in [-1, 0, 1]:
         base_day = today + timedelta(days=day_offset)
-        win = window_for_day(base_day)
-        start = win["solar_midnight"]
-        end = start + timedelta(seconds=win["T_solar"])
-        if start <= utc < end:
+        ref_noon, solar_midnight, T_solar = window_for_day(base_day)
+        end = solar_midnight + timedelta(seconds=T_solar)
+        if solar_midnight <= utc < end:
             break
     else:
         # In 1 000 000 second-roundtrips there are 2 pathological ones that fail.
         # This is likely caused by a EoT discontinuity or a cumulative timing effect causing an intersection gap.
         # It's also not a floating point rounding issue, so there is no easy fix it's not worth further complicating the code.
         # So we cheat: try previous or next second and reuse result
-        fudge_prev = utc_to_ctu(utc - timedelta(seconds=1), longitude)
-        return fudge_prev
+        return utc_to_ctu(utc - timedelta(seconds=1), longitude)
 
-    # We found the correct window
-    ref_noon = win["ref_noon"]
     ref_day = ref_noon.date()
-    solar_midnight = win["solar_midnight"]
-    flex_margin = win["flex_margin"]
-    fixed_start = solar_midnight + timedelta(seconds=flex_margin)
-    fixed_end = fixed_start + timedelta(seconds=FIXED_SEC)
 
-    # Convert to CTU seconds
-    if utc < fixed_start:
-        elapsed = (utc - solar_midnight).total_seconds()
-        ctu_sec = (elapsed / flex_margin) * 3600
-    elif utc <= fixed_end:
-        elapsed = (utc - fixed_start).total_seconds()
-        ctu_sec = 3600 + elapsed
+    elapsed = (utc - solar_midnight).total_seconds()
+
+    # For elapsed time within the first 23 fixed hours, CTU time equals elapsed time.
+    if elapsed <= FIXED_SEC:
+        ctu_sec = elapsed
     else:
-        elapsed = (utc - fixed_end).total_seconds()
-        ctu_sec = 3600 + FIXED_SEC + (elapsed / flex_margin) * 3600
+        # Otherwise, map the remaining elapsed seconds linearly into 3600 CTU seconds.
+        extra = elapsed - FIXED_SEC
+        variable_length = (
+            T_solar - FIXED_SEC
+        )  # Actual solar seconds in the variable midnight hour.
+        ctu_sec = FIXED_SEC + (extra / variable_length) * 3600
 
-    # Normalize
-    ctu_sec %= 86400
+    # Normalize into [0, 86400) if needed.
+    ctu_sec %= TOTAL_CTU_SEC
     hours, rem = divmod(int(ctu_sec), 3600)
     minutes, seconds = divmod(rem, 60)
     micro = round((ctu_sec - int(ctu_sec)) * 1_000_000)
@@ -100,42 +104,46 @@ def utc_to_ctu(utc: datetime, longitude: float) -> tuple[time, date]:
 
 
 def ctu_to_utc(ctu: time, ref_day: date, longitude: float) -> datetime:
-    """Converts CTU time back to UTC with high precision."""
+    """
+    Invert the asymmetrical conversion: convert CTU back to UTC.
+
+    For CTU seconds below 82800, the mapping is 1:1.
+    For CTU seconds above or equal to 82800, the inverse scaling recovers the actual
+    solar seconds in the variable midnight hour.
+    """
     ref_noon = calc_noon_utc(
         longitude,
         datetime(ref_day.year, ref_day.month, ref_day.day, tzinfo=timezone.utc),
     )
     next_noon = calc_noon_utc(longitude, ref_noon + timedelta(days=1))
     T_solar = (next_noon - ref_noon).total_seconds()
-    flex_total = T_solar - FIXED_SEC
-    flex_margin = flex_total / 2
-
     solar_midnight = ref_noon - timedelta(seconds=T_solar / 2)
-    fixed_start = solar_midnight + timedelta(seconds=flex_margin)
-    fixed_end = fixed_start + timedelta(seconds=FIXED_SEC)
 
+    # Compute total CTU seconds from the input CTU time.
     ctu_sec = ctu.hour * 3600 + ctu.minute * 60 + ctu.second + ctu.microsecond / 1e6
-    scale = flex_margin / 3600
 
-    if ctu_sec < 3600:  # Dawn zone (scaled)
-        t_dawn = ctu_sec * scale
-        utc = solar_midnight + timedelta(seconds=t_dawn)
-    elif ctu_sec <= 3600 + FIXED_SEC:  # Fixed zone (1h–23h)
-        t_fixed = ctu_sec - 3600
-        utc = fixed_start + timedelta(seconds=t_fixed)
-    else:  # Dusk zone (scaled)
-        t_dusk = (ctu_sec - 3600 - FIXED_SEC) * scale
-        utc = fixed_end + timedelta(seconds=t_dusk)
+    if ctu_sec <= FIXED_SEC:
+        elapsed = ctu_sec
+    else:
+        extra_ctu = ctu_sec - FIXED_SEC
+        variable_length = T_solar - FIXED_SEC
+        extra = (extra_ctu / 3600) * variable_length
+        elapsed = FIXED_SEC + extra
 
+    utc = solar_midnight + timedelta(seconds=elapsed)
     return utc.astimezone(timezone.utc)
 
 
 def now(longitude: float) -> time:
+    """Return the current CTU time using the asymmetric midnight model."""
     return utc_to_ctu(datetime.now(timezone.utc), longitude)[0]
 
 
-def roundtrip_test(longitude: float, utc_now: datetime):
-    """Validate CTU <=> UTC conversions with minimal error."""
+def roundtrip_test(longitude: float, utc_now: datetime) -> float:
+    """
+    Validate the CTU <=> UTC conversion by performing a roundtrip conversion.
+    Returns the absolute error in seconds.
+    """
     ctu_time, ref_day = utc_to_ctu(utc_now, longitude)
     back = ctu_to_utc(ctu_time, ref_day, longitude)
     return abs((utc_now - back).total_seconds())
