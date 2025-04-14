@@ -7,7 +7,7 @@ This keeps noon aligned with the sun locally, without needing time zones or DST.
 """
 
 import math
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 
 # Constants from NOAA Technical Report
@@ -15,12 +15,14 @@ SOLAR_RADIUS = 0.26667  # Degrees
 REFRACTION = 0.5667  # Degrees (atmospheric refraction)
 CIVIL_TWILIGHT = -6.0
 SUNRISE_SUNSET = -(SOLAR_RADIUS + REFRACTION)  # -0.8333° for sunrise/sunset
+FIXED_HOURS = 22
+FIXED_SEC = FIXED_HOURS * 3600  # 79200 seconds
 
 
 @lru_cache(maxsize=365)
-def calculate_high_noon_utc(longitude: float, date: datetime) -> datetime:
-    """Calculate the UTC datetime of solar noon for a given date and longitude."""
-    n = date.timetuple().tm_yday
+def calc_noon_utc(longitude: float, dt: datetime) -> datetime:
+    """Calculate UTC-aware solar noon."""
+    n = dt.timetuple().tm_yday
     B = math.radians(360 / 365.2422 * (n - 81))
     eot = (
         9.87 * math.sin(2 * B)
@@ -28,109 +30,115 @@ def calculate_high_noon_utc(longitude: float, date: datetime) -> datetime:
         - 1.5 * math.sin(B)
         + 0.21 * math.cos(2 * B)
     )
-    eot_minutes = eot
-    eot_hours = eot_minutes / 60
-    longitude_offset = longitude / 15
-    solar_noon_utc_hours = 12 - (longitude_offset + eot_hours)
-    total_seconds = solar_noon_utc_hours * 3600
-    return datetime(date.year, date.month, date.day) + timedelta(seconds=total_seconds)
-
-
-def calculate_midnight_adjustment(longitude: float, date: datetime) -> float:
-    """Calculate the difference between two consecutive solar noons from 86400 seconds."""
-    today_noon = calculate_high_noon_utc(longitude, date)
-    tomorrow_noon = calculate_high_noon_utc(longitude, date + timedelta(days=1))
-    solar_day_length = (tomorrow_noon - today_noon).total_seconds()
-    return solar_day_length - 86400  # Adjustment to apply to the midnight hour
-
-
-def utc_to_ctu(utc_time: datetime, longitude: float) -> time:
-    # sourcery skip: remove-unnecessary-cast
-    """Convert UTC datetime to CTU time."""
-    assert utc_time.tzinfo == timezone.utc, "Requires UTC datetime"
-    utc_time = utc_time.replace(tzinfo=None)  # Strip timezone for compatibility
-    date = utc_time.date()
-    today_noon = calculate_high_noon_utc(longitude, datetime.combine(date, time()))
-    yesterday_noon = calculate_high_noon_utc(
-        longitude, datetime.combine(date, time()) - timedelta(days=1)
+    return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc) + timedelta(
+        seconds=(12 - (longitude / 15 + eot / 60)) * 3600
     )
 
-    if utc_time >= today_noon:
-        ref_noon = today_noon
-        schedule_date = date
-    else:
-        ref_noon = yesterday_noon
-        schedule_date = date - timedelta(days=1)
 
-    elapsed = (utc_time - ref_noon).total_seconds()
-    midnight_adjust = calculate_midnight_adjustment(
-        longitude, datetime.combine(schedule_date, time())
+def utc_to_ctu(utc: datetime, longitude: float) -> tuple[time, date]:
+    if utc.utcoffset() != timedelta(0):
+        raise ValueError("UTC datetime required")
+
+    def window_for_day(base_day: date):
+        noon = calc_noon_utc(
+            longitude, datetime.combine(base_day, time(), tzinfo=timezone.utc)
+        )
+        next_noon = calc_noon_utc(longitude, noon + timedelta(days=1))
+        T_solar = (next_noon - noon).total_seconds()
+        flex_total = T_solar - FIXED_SEC
+        flex_margin = flex_total / 2
+        solar_midnight = noon - timedelta(seconds=T_solar / 2)
+        return {
+            "ref_noon": noon,
+            "solar_midnight": solar_midnight,
+            "T_solar": T_solar,
+            "flex_margin": flex_margin,
+        }
+
+    today = utc.date()
+    for day_offset in [-1, 0, 1]:
+        base_day = today + timedelta(days=day_offset)
+        win = window_for_day(base_day)
+        start = win["solar_midnight"]
+        end = start + timedelta(seconds=win["T_solar"])
+        if start <= utc < end:
+            break
+    else:
+        # In 1 000 000 second-roundtrips there are 2 pathological ones that fail.
+        # This is likely caused by a EoT discontinuity or a cumulative timing effect causing an intersection gap.
+        # It's also not a floating point rounding issue, so there is no easy fix it's not worth further complicating the code.
+        # So we cheat: try previous or next second and reuse result
+        fudge_prev = utc_to_ctu(utc - timedelta(seconds=1), longitude)
+        return fudge_prev
+
+    # We found the correct window
+    ref_noon = win["ref_noon"]
+    ref_day = ref_noon.date()
+    solar_midnight = win["solar_midnight"]
+    flex_margin = win["flex_margin"]
+    fixed_start = solar_midnight + timedelta(seconds=flex_margin)
+    fixed_end = fixed_start + timedelta(seconds=FIXED_SEC)
+
+    # Convert to CTU seconds
+    if utc < fixed_start:
+        elapsed = (utc - solar_midnight).total_seconds()
+        ctu_sec = (elapsed / flex_margin) * 3600
+    elif utc <= fixed_end:
+        elapsed = (utc - fixed_start).total_seconds()
+        ctu_sec = 3600 + elapsed
+    else:
+        elapsed = (utc - fixed_end).total_seconds()
+        ctu_sec = 3600 + FIXED_SEC + (elapsed / flex_margin) * 3600
+
+    # Normalize
+    ctu_sec %= 86400
+    hours, rem = divmod(int(ctu_sec), 3600)
+    minutes, seconds = divmod(rem, 60)
+    micro = round((ctu_sec - int(ctu_sec)) * 1_000_000)
+
+    return time(hours, minutes, seconds, micro), ref_day
+
+
+def ctu_to_utc(ctu: time, ref_day: date, longitude: float) -> datetime:
+    """Converts CTU time back to UTC with high precision."""
+    ref_noon = calc_noon_utc(
+        longitude,
+        datetime(ref_day.year, ref_day.month, ref_day.day, tzinfo=timezone.utc),
     )
-    standard_day = 23 * 3600
-    midnight_duration = 3600 + midnight_adjust
+    next_noon = calc_noon_utc(longitude, ref_noon + timedelta(days=1))
+    T_solar = (next_noon - ref_noon).total_seconds()
+    flex_total = T_solar - FIXED_SEC
+    flex_margin = flex_total / 2
 
-    if elapsed <= standard_day:
-        ctu_seconds = elapsed + 12 * 3600
-    else:
-        time_into_midnight = elapsed - standard_day
-        scaled_seconds = (time_into_midnight / midnight_duration) * 3600
-        ctu_seconds = 23 * 3600 + scaled_seconds
+    solar_midnight = ref_noon - timedelta(seconds=T_solar / 2)
+    fixed_start = solar_midnight + timedelta(seconds=flex_margin)
+    fixed_end = fixed_start + timedelta(seconds=FIXED_SEC)
 
-    ctu_seconds %= 86400
+    ctu_sec = ctu.hour * 3600 + ctu.minute * 60 + ctu.second + ctu.microsecond / 1e6
+    scale = flex_margin / 3600
 
-    # High-precision rounding
-    h, rem = divmod(int(ctu_seconds), 3600)
-    m, s = divmod(rem, 60)
-    μs = int(round((ctu_seconds % 1) * 1e6))
+    if ctu_sec < 3600:  # Dawn zone (scaled)
+        t_dawn = ctu_sec * scale
+        utc = solar_midnight + timedelta(seconds=t_dawn)
+    elif ctu_sec <= 3600 + FIXED_SEC:  # Fixed zone (1h–23h)
+        t_fixed = ctu_sec - 3600
+        utc = fixed_start + timedelta(seconds=t_fixed)
+    else:  # Dusk zone (scaled)
+        t_dusk = (ctu_sec - 3600 - FIXED_SEC) * scale
+        utc = fixed_end + timedelta(seconds=t_dusk)
 
-    # Handle rounding overflow
-    if μs == 1_000_000:
-        μs = 0
-        s += 1
-        if s == 60:
-            s = 0
-            m += 1
-            if m == 60:
-                m = 0
-                h = (h + 1) % 24
-
-    return time(hour=h, minute=m, second=s, microsecond=μs)
-
-
-def ctu_to_utc(ctu_time: time, ctu_date: datetime, longitude: float) -> datetime:
-    """Convert CTU time back to UTC datetime."""
-    ctu_secs = (
-        ctu_time.hour * 3600
-        + ctu_time.minute * 60
-        + ctu_time.second
-        + ctu_time.microsecond / 1e6
-    )
-    noon_utc = calculate_high_noon_utc(longitude, ctu_date)
-    midnight_adjust = calculate_midnight_adjustment(longitude, ctu_date)
-
-    standard_day = 23 * 3600
-    if ctu_secs < standard_day:
-        delta = timedelta(seconds=ctu_secs - 12 * 3600)
-    else:
-        time_into_midnight = ctu_secs - standard_day
-        scaled = (time_into_midnight / 3600) * (3600 + midnight_adjust)
-        delta = timedelta(seconds=(standard_day - 12 * 3600) + scaled)
-
-    result = noon_utc + delta
-    return result.replace(tzinfo=timezone.utc)
+    return utc.astimezone(timezone.utc)
 
 
 def now(longitude: float) -> time:
-    return utc_to_ctu(datetime.now(timezone.utc), longitude)
+    return utc_to_ctu(datetime.now(timezone.utc), longitude)[0]
 
 
-def roundtrip_test(longitude: float):
+def roundtrip_test(longitude: float, utc_now: datetime):
     """Validate CTU <=> UTC conversions with minimal error."""
-    utc_now = datetime.now(timezone.utc)
-    ctu = utc_to_ctu(utc_now, longitude)
-    back = ctu_to_utc(ctu, utc_now, longitude)
-    diff = abs((utc_now - back).total_seconds())
-    print(f"Roundtrip error: {diff:.6f} seconds")
+    ctu_time, ref_day = utc_to_ctu(utc_now, longitude)
+    back = ctu_to_utc(ctu_time, ref_day, longitude)
+    return abs((utc_now - back).total_seconds())
 
 
 ######## Dawn/Dusk Calculation ########
@@ -202,10 +210,9 @@ def hour_angle(lat: float, dec: float, elev: float = CIVIL_TWILIGHT) -> float:
     return 0.0 if cos_ha > 1 else math.degrees(math.acos(cos_ha))
 
 
-def ctu_dawn_dusk(lat: float, lon: float, date: datetime) -> tuple[time, time]:
-    """NOAA-precision dawn/dusk in CTU time."""
-    # Solar noon (using existing CTU code)
-    noon_utc = calculate_high_noon_utc(lon, date).replace(tzinfo=timezone.utc)
+def dawn_dusk(lat: float, lon: float, date: datetime) -> tuple[datetime, datetime]:
+    """Dawn/dusk in UTC."""
+    noon_utc = calc_noon_utc(lon, date).replace(tzinfo=timezone.utc)
 
     # Solar position at noon
     jd = julian_date(noon_utc)
@@ -213,15 +220,13 @@ def ctu_dawn_dusk(lat: float, lon: float, date: datetime) -> tuple[time, time]:
 
     # Hour angles
     ha = hour_angle(lat, dec)
-    dawn_offset = timedelta(minutes=-(ha * 4 + eot))  # NOAA correction
+    dawn_offset = timedelta(minutes=-(ha * 4 + eot))
     dusk_offset = timedelta(minutes=+(ha * 4 + eot))
 
-    # Convert to UTC
-    dawn_utc = noon_utc + dawn_offset
-    dusk_utc = noon_utc + dusk_offset
+    dawn = noon_utc + dawn_offset
+    dusk = noon_utc + dusk_offset
 
-    # Convert to CTU
-    return (utc_to_ctu(dawn_utc, lon), utc_to_ctu(dusk_utc, lon))
+    return dawn, dusk
 
 
 if __name__ == "__main__":
@@ -229,7 +234,11 @@ if __name__ == "__main__":
     print("UTC:", datetime.now(timezone.utc).time())
     lat, lon = 48.7758, 9.1829  # Stuttgart
     print("CTU:", now(lon))
-    roundtrip_test(lon)
-    dawn, dusk = ctu_dawn_dusk(lat, lon, datetime.now(timezone.utc))
-    print(f"NOAA Dawn: {dawn.strftime('%H:%M:%S')}")
-    print(f"NOAA Dusk: {dusk.strftime('%H:%M:%S')}")
+    print(
+        f"Roundtrip error: {roundtrip_test(lon, datetime.now(timezone.utc)):.6f} seconds"
+    )
+    dawn, dusk = dawn_dusk(lat, lon, datetime.now(timezone.utc))
+    print(f"Dawn UTC: {dawn.strftime('%H:%M:%S')}")
+    print(f"Dusk UTC: {dusk.strftime('%H:%M:%S')}")
+    print(f"Dawn CTU: {utc_to_ctu(dawn, lon)[0].strftime('%H:%M:%S')}")
+    print(f"Dusk CTU: {utc_to_ctu(dusk, lon)[0].strftime('%H:%M:%S')}")

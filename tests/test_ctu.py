@@ -5,8 +5,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from ctu_time import (
-    calculate_high_noon_utc,
-    calculate_midnight_adjustment,
+    calc_midnight_offset,
+    calc_noon_utc,
     ctu_to_utc,
     utc_to_ctu,
 )
@@ -33,7 +33,7 @@ def ctu_components(draw):
 @given(longitudes, dates)
 def test_solar_noon_is_12ctu(longitude, date):
     """12:00:00 CTU must always equal calculated solar noon"""
-    noon_utc = calculate_high_noon_utc(longitude, datetime.combine(date, time()))
+    noon_utc = calc_noon_utc(longitude, datetime.combine(date, time()))
     ctu_time = utc_to_ctu(noon_utc, longitude)
     assert ctu_time == time(12, 0, 0), f"Solar noon failure: {noon_utc} → {ctu_time}"
 
@@ -60,10 +60,10 @@ def test_midnight_adjustment_consistency(params):
     """Midnight adjustment should match solar day drift"""
     longitude, date = params
     base_date = datetime.combine(date, time())
-    delta = calculate_midnight_adjustment(longitude, base_date)
+    delta = calc_midnight_offset(longitude, base_date)
     expected = (
-        calculate_high_noon_utc(longitude, base_date + timedelta(days=1))
-        - calculate_high_noon_utc(longitude, base_date)
+        calc_noon_utc(longitude, base_date + timedelta(days=1))
+        - calc_noon_utc(longitude, base_date)
     ).total_seconds() - 86400
 
     assert abs(delta - expected) < 1e-6, "Adjustment doesn't match solar day drift"
@@ -79,7 +79,7 @@ def test_polar_longitude():
 
 def test_leap_year():
     """Feb 29 should produce valid CTU time"""
-    noon = calculate_high_noon_utc(0.0, datetime(2024, 2, 29))
+    noon = calc_noon_utc(0.0, datetime(2024, 2, 29))
     assert noon.month == 2 and noon.day == 29, "Leap year handling failed"
 
 
