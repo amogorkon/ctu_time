@@ -7,7 +7,6 @@
 [![Chrono-Biological](https://img.shields.io/badge/Aligns-With%20Circadian%20Rhythm-blue)]()
 
 ---
-
 ## ⚡ Why This Solves Real Problems
 
 ### The DST Body Count
@@ -87,7 +86,7 @@ if is_optimal_ctu_window(patient, ctu_time.hour):
 - Resilient to leap seconds and drift.
 
 ### 🚫 CTU Doesn’t:
-- Replace UTC in backend tech.
+- Replace UTC or unix timestamps in tech and science.
 - Predict dawn/dusk (requires latitude input).
 - Solve sleep disorders (we still need to fix light pollution).
 
@@ -100,5 +99,5 @@ CTU isn’t just a clock — it’s a return to natural time. A system that’s:
 - **Biologically attuned**
 - **Technically precise**
 - **Human-centered**
-
-Because you shouldn't need a time zone to tell you where the sun is.
+---
+TLDR: Timezones and DST suck. There has to be a better way! This is it. 
