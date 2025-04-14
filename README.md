@@ -74,9 +74,8 @@ if is_optimal_ctu_window(patient, ctu_time.hour):
 
 - Every CTU day is centered around **solar noon**.
 - The **final hour of the day (23:00–00:00)** dynamically absorbs the small fluctuations in the solar day (±30s typical).
-- This keeps **12:00:00 CTU = True Solar Noon**, globally.
+- This keeps **12:00:00 CTU = True Solar Noon**, globally, as well as **0:00 CTU = True Solar Midnight**
 - Conversions to/from UTC are precise and **roundtrip-safe to within ±1μs** for all but ~30 edge seconds/year (which fallback smoothly to ~1 sec error).
-
 ---
 
 ## 🧪 What CTU Is and Isn’t
