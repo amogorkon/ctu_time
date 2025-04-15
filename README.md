@@ -10,11 +10,13 @@
 ## ⚡ Why This Solves Real Problems
 
 ### The DST Body Count
-- **24% spike** in heart attacks after spring forward ([AHA Journal](https://www.ahajournals.org/doi/10.1161/CIRCRESAHA.119.316319))
-- **6% increase** in fatal crashes post-DST ([A Chronobiological Evaluation of the Acute Effects of
-Daylight Saving Time on Traffic Accident Risk](https://embargoed.www.cell.com/current-biology/pdf/S0960-9822%2819%2931678-1.pdf))
-
 Clock shifts aren't just annoying — they're deadly.
+
+- Increase of Correlation of Daylight Saving Time Transitions and Risk of Heart Attack ([PubMed](https://pubmed.ncbi.nlm.nih.gov/38888468/))
+- A Chronobiological Evaluation of the Acute Effects of
+Daylight Saving Time on Traffic Accident Risk ([Current Biology](https://embargoed.www.cell.com/current-biology/pdf/S0960-9822%2819%2931678-1.pdf))
+
+
 
 ---
 
