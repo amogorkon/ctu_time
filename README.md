@@ -10,10 +10,13 @@
 ## ⚡ Why This Solves Real Problems
 
 ### The DST Body Count
-- **24% spike** in heart attacks after spring forward ([AHA Journal](https://www.ahajournals.org/doi/10.1161/CIRCRESAHA.119.316319))
-- **6% increase** in fatal crashes post-DST ([Current Biology, 2020](https://www.sciencedirect.com/science/article/pii/S0960982220303021))
-
 Clock shifts aren't just annoying — they're deadly.
+
+- Increase of Correlation of Daylight Saving Time Transitions and Risk of Heart Attack ([PubMed](https://pubmed.ncbi.nlm.nih.gov/38888468/))
+- A Chronobiological Evaluation of the Acute Effects of
+Daylight Saving Time on Traffic Accident Risk ([Current Biology](https://embargoed.www.cell.com/current-biology/pdf/S0960-9822%2819%2931678-1.pdf))
+
+
 
 ---
 
@@ -64,8 +67,8 @@ if is_optimal_ctu_window(patient, ctu_time.hour):
 - **Sports recovery, learning, productivity** — all benefit from solar-truth anchoring.
 
 ### 3. A Universal Solar Context
-- “Available 14:00–18:00 my CTU” — means something anywhere on Earth.
-- **Streetlight automation**: Triggers at 18:00 CTU, not an arbitrary clock hour.
+- “Available 14:00–18:00 my CTU” — *means* something anywhere on Earth in relation to the sun.
+- **Streetlight automation**: Triggers at 18:00 CTU, not an arbitrary clock hour - well, the exact time would still be arbitrary, but now you can actually imagine the position of the sun at that time. Plus, if you know the exact dawn for that day, you can easily figure out the corresponding dusk and vice versa as midnight *really is* the middle of the night. And the length of the night is *actually* double the time of dawn - easy!
 
 ---
 
@@ -100,4 +103,6 @@ CTU isn’t just a clock — it’s a return to natural time. A system that’s:
 - **Technically precise**
 - **Human-centered**
 ---
-TLDR: Timezones and DST suck. There has to be a better way! This is it. 
+TLDR: Timezones and DST suck. There has to be a better way! UTC & CTU are the way to go. 
+
+***"Victory belongs to those who command the day. Synchronize your steps to the sun and meet fate on your own schedule." — Sun Tzu, probably***
