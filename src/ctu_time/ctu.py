@@ -73,10 +73,10 @@ def utc_to_ctu(utc: datetime, longitude: float) -> tuple[time, date]:
         if solar_midnight <= utc < end:
             break
     else:
-        # In 1 000 000 second-roundtrips there are 2 pathological ones that fail.
+        # In 1 000 000 second-roundtrips there are 38 pathological ones that fail.
         # This is likely caused by a EoT discontinuity or a cumulative timing effect causing an intersection gap.
-        # It's also not a floating point rounding issue, so there is no easy fix it's not worth further complicating the code.
-        # So we cheat: try previous or next second and reuse result
+        # It's also not a floating point rounding issue, so there is no easy fix not worth further complicating the code.
+        # So we cheat: try previous or next second and reuse result, limiting the error to ~1 second.
         return utc_to_ctu(utc - timedelta(seconds=1), longitude)
 
     ref_day = ref_noon.date()
