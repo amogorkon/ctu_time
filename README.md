@@ -103,4 +103,6 @@ CTU isn’t just a clock — it’s a return to natural time. A system that’s:
 - **Technically precise**
 - **Human-centered**
 ---
-TLDR: Timezones and DST suck. There has to be a better way! This is it. 
+TLDR: Timezones and DST suck. There has to be a better way! UTC & CTU are the way to go. 
+
+***"Victory belongs to those who command the day. Synchronize your steps to the sun and meet fate on your own schedule." — Sun Tzu, probably***
