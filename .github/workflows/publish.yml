@@ -31,5 +31,4 @@ jobs:
       run: python setup.py sdist bdist_wheel
 
     - name: Publish to PyPI
-      if: matrix.python-version == '3.11' # Only publish from one Python version
       uses: pypa/gh-action-pypi-publish@release/v1
