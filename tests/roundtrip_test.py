@@ -1,3 +1,5 @@
+"""Exhaustive test for roundtrip errors of ctu_time module."""
+
 from datetime import datetime, timedelta, timezone
 
 from tqdm import tqdm
