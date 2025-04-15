@@ -65,7 +65,7 @@ if is_optimal_ctu_window(patient, ctu_time.hour):
 
 ### 3. A Universal Solar Context
 - “Available 14:00–18:00 my CTU” — *means* something anywhere on Earth in relation to the sun.
-- **Streetlight automation**: Triggers at 18:00 CTU, not an arbitrary clock hour - well, the exact time would still be arbitrary, but now you can actually imagine the position of the sun at that time. If you know the exact dawn for that day, you can easily figure out the corresponding dusk and vice versa as midnight *really is* the middle of the night. And the length of the night is *actually* double the time of dawn - easy!
+- **Streetlight automation**: Triggers at 18:00 CTU, not an arbitrary clock hour - well, the exact time would still be arbitrary, but now you can actually imagine the position of the sun at that time. Plus, if you know the exact dawn for that day, you can easily figure out the corresponding dusk and vice versa as midnight *really is* the middle of the night. And the length of the night is *actually* double the time of dawn - easy!
 
 ---
 
