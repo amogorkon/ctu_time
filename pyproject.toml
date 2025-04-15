@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ctu_time"
-version = "1.0.0"
+version = "1.0.0r1"
 description = "CTU - Calculated Time Uncoordinated. Hyperlocal. No timezones. No DST. For Humans."
 authors = ["Anselm Kiefner <ctu-github@anselm.kiefner.de>"]
 license = "MIT"
